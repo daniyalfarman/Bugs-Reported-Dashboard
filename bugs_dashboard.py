@@ -156,26 +156,23 @@ if not df.empty:
         st.success("No unresolved issues! 🎉")
     
     st.subheader("📋 Module Performance Summary")
-    module_summary = df.groupby('module_name').agg({
-        'id': 'count',
-        'status': lambda x: (x == 'resolved').sum(),  # resolved count
-        'status': [  # Using multiple aggregations
-            ('Total Issues', 'count'),
-            ('Resolved', lambda x: (x == 'resolved').sum()),
-            ('In Progress', lambda x: (x == 'inprogress').sum()),
-            ('Unassigned', lambda x: (x == 'unassigned').sum()),
-        ],
-        'assigned_to': lambda x: x.notna().sum(),
-        'days_open': 'mean'
-    }).round(1)
-    
-    # Flatten column names
-    module_summary.columns = ['Total Issues', 'Resolved', 'In Progress', 'Unassigned', 'Assigned', 'Avg Days Open']
-    module_summary = module_summary.reset_index()
-    
+
+    # Fix the module summary aggregation
+    module_summary = df.groupby('module_name').agg(
+        Total_Issues=('id', 'count'),
+        Resolved=('status', lambda x: (x == 'resolved').sum()),
+        In_Progress=('status', lambda x: (x == 'inprogress').sum()),
+        Unassigned=('status', lambda x: (x == 'unassigned').sum()),
+        Assigned=('assigned_to', lambda x: x.notna().sum()),
+        Avg_Days_Open=('days_open', 'mean')
+    ).round(1).reset_index()
+
+    # Rename columns for display
+    module_summary.columns = ['Module', 'Total Issues', 'Resolved', 'In Progress', 'Unassigned', 'Assigned', 'Avg Days Open']
+
     # Add resolution rate
     module_summary['Resolution Rate'] = (module_summary['Resolved'] / module_summary['Total Issues'] * 100).round(1).astype(str) + '%'
-    
+
     st.dataframe(module_summary, use_container_width=True)
     
     # All issues table with status
