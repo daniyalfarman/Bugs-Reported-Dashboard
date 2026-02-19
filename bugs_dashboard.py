@@ -46,14 +46,37 @@ if not df.empty:
         'unassigned': '⏳'
     }
     
-    # ADD HOST FILTER HERE
-    st.subheader("Filter by Host")
-    host_options = ['All'] + sorted(df['host'].unique().tolist())
-    selected_host = st.selectbox("Select Host", host_options)
+        # Import re for hostname extraction
+        # Hardcoded host mapping
+    host_mapping = {
+        2: 'test',
+        3: 'demo',
+        4: 'excellenceacademy',
+        5: 'hhrd',
+        7: 'scholastic',
+        9: 'test',
+        None: 'localhost'
+    }
     
-    # Apply host filter
-    if selected_host != 'All':
-        df = df[df['host'] == selected_host]
+    # Add school names to dataframe using hardcoded mapping
+    df['school_name'] = df['host'].map(host_mapping).fillna('Unknown')
+    
+    # Create dropdown with ONLY school names
+    st.subheader("Filter by School")
+    
+    # Get unique school names (deduplicated)
+    unique_schools = ['All'] + sorted(df['school_name'].unique().tolist())
+    
+    # Show only school names in dropdown
+    selected_school_display = st.selectbox(
+        "Select School",
+        options=unique_schools
+    )
+    
+    # Apply filter based on selected school
+    if selected_school_display != 'All':
+        df = df[df['school_name'] == selected_school_display]
+        st.info(f"📌 Currently viewing: **{selected_school_display}**")
     
     # Create KPIs - Updated for new status field
     col1, col2, col3, col4, col5 = st.columns(5)
