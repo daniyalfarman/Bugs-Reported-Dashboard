@@ -39,6 +39,13 @@ if not df.empty:
         lambda x: json.loads(x).get('user_id') if pd.notna(x) else None
     )
     
+    # Status mappings for better display
+    status_colors = {
+        'resolved': '✅',
+        'inprogress': '🔄',
+        'unassigned': '⏳'
+    }
+    
     # ADD HOST FILTER HERE
     st.subheader("Filter by Host")
     host_options = ['All'] + sorted(df['host'].unique().tolist())
@@ -48,28 +55,50 @@ if not df.empty:
     if selected_host != 'All':
         df = df[df['host'] == selected_host]
     
-    # Create KPIs
-    col1, col2, col3, col4 = st.columns(4)
+    # Create KPIs - Updated for new status field
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.metric("Total Issues", len(df))
     
     with col2:
-        unresolved = len(df[df['resolved'] == False])
-        st.metric("Unresolved Issues", unresolved)
+        resolved = len(df[df['status'] == 'resolved'])
+        st.metric("✅ Resolved", resolved)
     
     with col3:
-        assigned = len(df[df['is_assigned']])
-        st.metric("Assigned Issues", assigned)
+        inprogress = len(df[df['status'] == 'inprogress'])
+        st.metric("🔄 In Progress", inprogress)
     
     with col4:
-        avg_days = round(df[df['resolved'] == False]['days_open'].mean(), 1) if len(df[df['resolved'] == False]) > 0 else 0
+        unassigned = len(df[df['status'] == 'unassigned'])
+        st.metric("⏳ Unassigned", unassigned)
+    
+    with col5:
+        # Calculate average days open for unresolved issues (inprogress + unassigned)
+        unresolved_df = df[df['status'].isin(['inprogress', 'unassigned'])]
+        avg_days = round(unresolved_df['days_open'].mean(), 1) if not unresolved_df.empty else 0
         st.metric("Avg Days Open (Unresolved)", avg_days)
     
-    # Charts
+    # Status distribution pie chart
     col1, col2 = st.columns(2)
     
     with col1:
+        # Status Distribution
+        status_counts = df['status'].value_counts().reset_index()
+        status_counts.columns = ['Status', 'Count']
+        # Map status to display names with emojis
+        status_counts['Status'] = status_counts['Status'].map({
+            'resolved': '✅ Resolved',
+            'inprogress': '🔄 In Progress',
+            'unassigned': '⏳ Unassigned'
+        })
+        
+        fig_pie = px.pie(status_counts, values='Count', names='Status',
+                         title='Issues by Status',
+                         color_discrete_sequence=['#00CC96', '#FFA15A', '#AB63FA'])
+        st.plotly_chart(fig_pie, use_container_width=True)
+    
+    with col2:
         # Issues by Module
         module_counts = df['module_name'].value_counts().reset_index()
         module_counts.columns = ['Module', 'Count']
@@ -79,47 +108,89 @@ if not df.empty:
                      color_continuous_scale='Viridis')
         st.plotly_chart(fig, use_container_width=True)
     
-    with col2:
-        # Unresolved issues by days open
-        unresolved_df = df[df['resolved'] == False].copy()
+    # Second row charts
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Unresolved issues by days open (inprogress + unassigned)
+        unresolved_df = df[df['status'].isin(['inprogress', 'unassigned'])].copy()
         if not unresolved_df.empty:
+            # Add status color to histogram
             fig2 = px.histogram(unresolved_df, x='days_open', 
+                               color='status',
                                title='Unresolved Issues - Days Open Distribution',
                                nbins=20,
-                               labels={'days_open': 'Days Open'})
+                               labels={'days_open': 'Days Open', 'status': 'Status'},
+                               color_discrete_map={'inprogress': '#FFA15A', 'unassigned': '#AB63FA'})
             st.plotly_chart(fig2, use_container_width=True)
         else:
             st.info("No unresolved issues to display")
     
-    # Key Tables
-    st.subheader("🔴 Unresolved Issues (by age)")
-    oldest_unresolved = df[df['resolved'] == False].nlargest(10, 'days_open')
-    if not oldest_unresolved.empty:
-        st.dataframe(oldest_unresolved[['id', 'module_name', 'reported_by', 'days_open', 'assigned_to', 'comments']], use_container_width=True)
-    else:
-        st.success("No unresolved issues!")
+    with col2:
+        # Status by Module (stacked bar chart)
+        status_by_module = pd.crosstab(df['module_name'], df['status'])
+        if not status_by_module.empty:
+            fig3 = px.bar(status_by_module, 
+                         title='Status Distribution by Module',
+                         barmode='stack',
+                         color_discrete_map={'resolved': '#00CC96', 
+                                           'inprogress': '#FFA15A', 
+                                           'unassigned': '#AB63FA'})
+            st.plotly_chart(fig3, use_container_width=True)
+        else:
+            st.info("No data for module status breakdown")
     
-    st.subheader("📋 Issues by Module - Detailed")
+    # Key Tables - Updated for status
+    st.subheader("🔴 Issues Needing Attention (In Progress + Unassigned)")
+    attention_issues = df[df['status'].isin(['inprogress', 'unassigned'])].nlargest(10, 'days_open')
+    if not attention_issues.empty:
+        display_df = attention_issues[['id', 'module_name', 'status', 'reported_by', 'days_open', 'assigned_to', 'comments']].copy()
+        # Add emojis to status for better visualization
+        display_df['status'] = display_df['status'].map({
+            'resolved': '✅ Resolved',
+            'inprogress': '🔄 In Progress',
+            'unassigned': '⏳ Unassigned'
+        })
+        st.dataframe(display_df, use_container_width=True)
+    else:
+        st.success("No unresolved issues! 🎉")
+    
+    st.subheader("📋 Module Performance Summary")
     module_summary = df.groupby('module_name').agg({
         'id': 'count',
-        'resolved': lambda x: (~x).sum(),  # unresolved count
+        'status': lambda x: (x == 'resolved').sum(),  # resolved count
+        'status': [  # Using multiple aggregations
+            ('Total Issues', 'count'),
+            ('Resolved', lambda x: (x == 'resolved').sum()),
+            ('In Progress', lambda x: (x == 'inprogress').sum()),
+            ('Unassigned', lambda x: (x == 'unassigned').sum()),
+        ],
         'assigned_to': lambda x: x.notna().sum(),
         'days_open': 'mean'
-    }).round(1).rename(columns={
-        'id': 'Total Issues',
-        'resolved': 'Unresolved',
-        'assigned_to': 'Assigned',
-        'days_open': 'Avg Days Open'
-    }).reset_index()
+    }).round(1)
+    
+    # Flatten column names
+    module_summary.columns = ['Total Issues', 'Resolved', 'In Progress', 'Unassigned', 'Assigned', 'Avg Days Open']
+    module_summary = module_summary.reset_index()
+    
+    # Add resolution rate
+    module_summary['Resolution Rate'] = (module_summary['Resolved'] / module_summary['Total Issues'] * 100).round(1).astype(str) + '%'
     
     st.dataframe(module_summary, use_container_width=True)
     
-    # All issues table
+    # All issues table with status
     with st.expander("View All Issues"):
-        st.dataframe(df[
-            ['id', 'module_name', 'reported_by', 'reported_date', 
-             'days_open', 'resolved', 'assigned_to', 'comments']
-        ].sort_values('reported_date', ascending=False), use_container_width=True)
+        display_all = df[[
+            'id', 'module_name', 'status', 'reported_by', 'reported_date', 
+            'days_open', 'assigned_to', 'comments'
+        ]].copy()
+        # Add emojis to status
+        display_all['status'] = display_all['status'].map({
+            'resolved': '✅ Resolved',
+            'inprogress': '🔄 In Progress',
+            'unassigned': '⏳ Unassigned'
+        })
+        st.dataframe(display_all.sort_values('reported_date', ascending=False), use_container_width=True)
 
 else:
     st.warning("No data available")
